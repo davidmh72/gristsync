@@ -19,7 +19,7 @@ services:
       - traefik-proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.gristsync.rule=Host(`sync.teebase.net`)"
+      - "traefik.http.routers.gristsync.rule=Host(`gristsync.teebase.net`)"
       - "traefik.http.routers.gristsync.entrypoints=websecure"
       - "traefik.http.routers.gristsync.tls.certresolver=letsencrypt"
       - "traefik.http.services.gristsync.loadbalancer.server.port=3000"
