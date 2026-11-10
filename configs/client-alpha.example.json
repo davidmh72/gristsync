@@ -1,0 +1,22 @@
+{
+  "tenant_id": "client-alpha",
+  "grist": {
+    "doc_id": "YOUR_GRIST_DOC_ID",
+    "table_id": "Contacts",
+    "api_url": "https://docs.getgrist.com/api/docs/YOUR_GRIST_DOC_ID",
+    "api_key": "env:GRIST_API_KEY_ALPHA"
+  },
+  "mailchimp": {
+    "list_id": "YOUR_MAILCHIMP_AUDIENCE_ID",
+    "api_key": "env:MAILCHIMP_API_KEY_ALPHA",
+    "server_prefix": "us20"
+  },
+  "field_mapping": {
+    "external_first_name": "First_Name",
+    "external_last_name": "Last_Name",
+    "external_email": "Email_1"
+  },
+  "rules": {
+    "lock_email_if_mailchimp_id_exists": true
+  }
+}

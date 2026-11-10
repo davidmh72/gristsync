@@ -8,8 +8,10 @@ const MASTER_WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'super_secure_master
 
 export function verifyWebhookSignature(req: Request, res: Response, next: NextFunction): void {
   const tenantId = req.params.tenantId;
-  const signatureHeader = req.headers['x-webhook-signature'] || req.headers['x-mailchimp-signature'] as string;
-  const tokenHeader = req.headers['x-webhook-token'] as string;
+  const signatureRaw = req.headers['x-webhook-signature'] || req.headers['x-mailchimp-signature'];
+  const signatureHeader = Array.isArray(signatureRaw) ? signatureRaw[0] : signatureRaw;
+  const tokenRaw = req.headers['x-webhook-token'];
+  const tokenHeader = Array.isArray(tokenRaw) ? tokenRaw[0] : tokenRaw;
 
   // 1. Check custom bearer/token header if configured per tenant
   if (tokenHeader && tokenHeader === MASTER_WEBHOOK_SECRET) {
@@ -23,7 +25,13 @@ export function verifyWebhookSignature(req: Request, res: Response, next: NextFu
       .update(JSON.stringify(req.body))
       .digest('hex');
 
-    if (crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(computedSignature))) {
+    const signatureBuffer = Buffer.from(signatureHeader);
+    const computedBuffer = Buffer.from(computedSignature);
+
+    if (
+      signatureBuffer.length === computedBuffer.length &&
+      crypto.timingSafeEqual(signatureBuffer, computedBuffer)
+    ) {
       return next();
     }
   }

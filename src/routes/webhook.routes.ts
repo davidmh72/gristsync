@@ -52,4 +52,38 @@ function cryptoRandomString(): string {
   return Math.random().toString(36).substring(2, 15);
 }
 
+// Outbound sync trigger endpoint for Grist custom widget / native webhook
+router.post('/api/sync/outbound/:tenantId', verifyWebhookSignature, async (req: Request, res: Response): Promise<void> => {
+  const tenantId = req.params.tenantId;
+  const rawBody = req.body;
+
+  const eventId = rawBody.id || rawBody.record?.id || cryptoRandomString();
+  const actionType = rawBody.action || 'update';
+
+  const jobData: SyncJobData = {
+    tenantId,
+    eventId: String(eventId),
+    source: 'grist',
+    action: actionType,
+    payload: rawBody,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await enqueueWebhookJob(jobData);
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Outbound sync event enqueued successfully.',
+      eventId: jobData.eventId,
+    });
+  } catch (error: any) {
+    console.error(`[Outbound Router] Failed to enqueue outbound job for tenant ${tenantId}:`, error.message);
+    res.status(500).json({
+      status: 'error',
+      message: 'Internal queue ingestion error.',
+    });
+  }
+});
+
 export default router;

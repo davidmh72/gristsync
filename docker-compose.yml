@@ -12,6 +12,9 @@ services:
       - PORT=3000
       - REDIS_HOST=gristsync-redis
       - REDIS_PORT=6379
+      - CONFIG_DIR=/app/configs
+    volumes:
+      - /var/www/gristsync/configs:/app/configs:ro
     depends_on:
       gristsync-redis:
         condition: service_healthy

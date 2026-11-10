@@ -14,15 +14,21 @@ export const redisConnectionOptions: ConnectionOptions = {
   password: redisPassword || undefined,
   maxRetriesPerRequest: null, // Required by BullMQ
   enableReadyCheck: false,
+  lazyConnect: true,
 };
 
-// Dedicated IORedis client instance for queue producers and health monitoring
-export const redisClient = new IORedis(redisConnectionOptions);
-
-redisClient.on('connect', () => {
-  console.log(`[Redis] Connected successfully to ${redisHost}:${redisPort}`);
+// Dedicated IORedis client instance for health monitoring and queue helpers
+export const redisClient = new IORedis({
+  ...redisConnectionOptions,
+  lazyConnect: true,
 });
 
-redisClient.on('error', (err) => {
-  console.error('[Redis] Connection error:', err);
-});
+if (process.env.NODE_ENV !== 'test') {
+  redisClient.on('connect', () => {
+    console.log(`[Redis] Connected successfully to ${redisHost}:${redisPort}`);
+  });
+
+  redisClient.on('error', (err) => {
+    console.error('[Redis] Connection error:', err.message);
+  });
+}

@@ -1,3 +1,22 @@
+export interface RawTenantConfig {
+  tenant_id: string;
+  grist: {
+    doc_id: string;
+    table_id: string;
+    api_url: string;
+    api_key: string;
+  };
+  mailchimp: {
+    list_id: string;
+    api_key: string;
+    server_prefix: string;
+  };
+  field_mapping: Record<string, string>;
+  rules?: {
+    lock_email_if_mailchimp_id_exists?: boolean;
+  };
+}
+
 export interface TenantConfig {
   tenantId: string;
   grist: {
