@@ -22,6 +22,16 @@ GristSync is a high-reliability, multi-tenant bidirectional synchronization serv
   - Always run `npm test` (all test suites must pass).
   - Always run `npm run build` (TypeScript compiler must compile with zero errors).
 
+## Autonomous Development & Verification Guardrails
+1. **Red-Green TDD Workflow**:
+   - For bug fixes and new features, write or update the unit test first and confirm the failure state before applying the implementation.
+   - Iterate against test runner and compiler error feedback until 100% green.
+2. **Zero-Placeholder Constraint**:
+   - Never output placeholder code, partial implementations, stubbed handlers, or comments like `// TODO: implement later`. All touched code must be production-complete and fully functional.
+3. **Micro-Phased Execution**:
+   - Decompose multi-step tasks into discrete architectural layers (Types $\rightarrow$ Safety/Services $\rightarrow$ Queue/Routes $\rightarrow$ Tests).
+   - Validate each layer with compiler checks (`npm run build`) and test suites (`npm test`) before proceeding to the next.
+
 ## CI/CD Standards (GitHub Actions)
 - All branches and pull requests are verified via GitHub Actions (`.github/workflows/ci.yml`).
 - CI runs TypeScript validation, unit test execution, and integration testing using a dedicated Redis service container (`redis:7-alpine`).

@@ -90,3 +90,38 @@ export async function writeSyncLog(
     console.warn(`[Grist Service] Could not log to Sync_Logs table:`, err.message);
   }
 }
+
+export interface GristColumnSchema {
+  id: string;
+  label: string;
+  type: string;
+}
+
+/**
+ * Fetches column definitions for the configured Grist table
+ */
+export async function fetchGristColumns(
+  tenantConfig: TenantConfig
+): Promise<GristColumnSchema[]> {
+  const url = `${tenantConfig.grist.apiUrl}/tables/${tenantConfig.grist.tableId}/columns`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${tenantConfig.grist.apiKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch Grist columns [${response.status}]: ${errorText}`);
+  }
+
+  const data: any = await response.json();
+  return (data.columns || []).map((col: any) => ({
+    id: col.id,
+    label: col.fields?.label || col.id,
+    type: col.fields?.type || 'Text',
+  }));
+}
+

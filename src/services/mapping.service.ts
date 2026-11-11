@@ -1,3 +1,5 @@
+import { FieldDirection } from '../types/sync.types';
+
 export interface MailchimpMemberPayload {
   email_address?: string;
   mailchimp_id?: string;
@@ -10,7 +12,8 @@ export interface MailchimpMemberPayload {
  */
 export function mapGristToMailchimp(
   gristFields: Record<string, any>,
-  fieldMapping: Record<string, string>
+  fieldMapping: Record<string, string>,
+  fieldDirections: Record<string, FieldDirection> = {}
 ): MailchimpMemberPayload {
   let email = '';
   const mergeFields: Record<string, any> = {};
@@ -24,6 +27,11 @@ export function mapGristToMailchimp(
   for (const [gristCol, val] of Object.entries(gristFields)) {
     const extName = gristToExternal[gristCol] || gristCol;
     const lowerExt = extName.toLowerCase();
+
+    // Outbound: Mailchimp is the authority for mailchimp_only fields, so strip Grist changes
+    if (fieldDirections[lowerExt] === 'mailchimp_only') {
+      continue;
+    }
 
     if (lowerExt.includes('email') || lowerExt === 'external_email') {
       email = String(val || '');
@@ -47,7 +55,8 @@ export function mapGristToMailchimp(
  */
 export function mapMailchimpToGrist(
   mcData: { email?: string; email_address?: string; id?: string; merges?: Record<string, any>; merge_fields?: Record<string, any> },
-  fieldMapping: Record<string, string>
+  fieldMapping: Record<string, string>,
+  fieldDirections: Record<string, FieldDirection> = {}
 ): Record<string, any> {
   const gristRecord: Record<string, any> = {};
   const email = mcData.email || mcData.email_address || '';
@@ -56,6 +65,12 @@ export function mapMailchimpToGrist(
   // Standard email mapping
   for (const [extField, gristCol] of Object.entries(fieldMapping)) {
     const lowerExt = extField.toLowerCase();
+
+    // Inbound: Grist is the authority for grist_only fields, so strip Mailchimp changes
+    if (fieldDirections[lowerExt] === 'grist_only') {
+      continue;
+    }
+
     if (lowerExt.includes('email') || lowerExt === 'external_email') {
       gristRecord[gristCol] = email;
     } else if (lowerExt === 'external_first_name' || lowerExt === 'fname') {

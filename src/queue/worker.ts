@@ -1,5 +1,6 @@
 import { Worker, Job, BackoffStrategy } from 'bullmq';
-import { redisConnectionOptions } from './connection';
+import crypto from 'crypto';
+import { redisConnectionOptions, redisClient } from './connection';
 import { SYNC_QUEUE_NAME } from './producer';
 import { SyncJobData } from '../types/sync.types';
 import { getTenantConfig } from '../config/tenantConfig';
@@ -70,6 +71,49 @@ export function startSyncWorker(): Worker<SyncJobData> {
   return worker;
 }
 
+/**
+ * Ephemeral Redis-backed distributed lock per contact with a 30-second TTL
+ * Prevents split-brain overwriting when simultaneous webhooks target the same contact
+ */
+export async function acquireContactLock(
+  tenantId: string,
+  email: string,
+  ttlSeconds = 30
+): Promise<string | null> {
+  if (!email) return null;
+  const lockKey = `lock:contact:${tenantId}:${email.toLowerCase().trim()}`;
+  const token = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+
+  try {
+    const result = await redisClient.set(lockKey, token, 'EX', ttlSeconds, 'NX');
+    if (result === 'OK') {
+      return token;
+    }
+    return null;
+  } catch (err: any) {
+    console.warn(`[Mutex] Redis lock acquisition note: ${err.message}`);
+    return token;
+  }
+}
+
+export async function releaseContactLock(
+  tenantId: string,
+  email: string,
+  token: string | null
+): Promise<void> {
+  if (!email || !token) return;
+  const lockKey = `lock:contact:${tenantId}:${email.toLowerCase().trim()}`;
+
+  try {
+    const currentVal = await redisClient.get(lockKey);
+    if (currentVal === token) {
+      await redisClient.del(lockKey);
+    }
+  } catch (err: any) {
+    console.warn(`[Mutex] Redis lock release note: ${err.message}`);
+  }
+}
+
 export async function processMailchimpWebhookEvent(tenantId: string, action: string, payload: any): Promise<void> {
   const tenantConfig = getTenantConfig(tenantId);
   if (!tenantConfig) {
@@ -77,14 +121,34 @@ export async function processMailchimpWebhookEvent(tenantId: string, action: str
   }
 
   const mcData = payload.data || payload;
-  const gristFields = mapMailchimpToGrist(mcData, tenantConfig.fieldMapping);
+  const email = (mcData.email || mcData.email_address || '').toLowerCase().trim();
 
-  // Set Loop Prevention markers
-  gristFields.Sync_Source = 'Mailchimp';
-  gristFields.Sync_Checksum = computeChecksum(gristFields);
+  let lockToken: string | null = null;
+  if (email) {
+    lockToken = await acquireContactLock(tenantId, email, 30);
+    if (!lockToken) {
+      throw new Error(`Contact lock active for ${email}, delaying sync retry.`);
+    }
+  }
 
-  console.log(`[Worker] Writing Mailchimp contact [${mcData.email || mcData.id}] to Grist for tenant [${tenantId}]`);
-  await writeToGrist(tenantConfig, gristFields);
+  try {
+    const gristFields = mapMailchimpToGrist(
+      mcData,
+      tenantConfig.fieldMapping,
+      tenantConfig.rules?.fieldDirections
+    );
+
+    // Set Loop Prevention markers
+    gristFields.Sync_Source = 'Mailchimp';
+    gristFields.Sync_Checksum = computeChecksum(gristFields);
+
+    console.log(`[Worker] Writing Mailchimp contact [${mcData.email || mcData.id}] to Grist for tenant [${tenantId}]`);
+    await writeToGrist(tenantConfig, gristFields);
+  } finally {
+    if (email && lockToken) {
+      await releaseContactLock(tenantId, email, lockToken);
+    }
+  }
 }
 
 export async function processGristStagedEvent(tenantId: string, action: string, payload: any): Promise<void> {
@@ -115,32 +179,52 @@ export async function processGristStagedEvent(tenantId: string, action: string, 
     console.warn(`[Worker] Intercepted and blocked modifications to locked fields [${blockedFields.join(', ')}] on connected contact for tenant [${tenantId}].`);
   }
 
-  // 3. Map to Mailchimp subscriber payload
-  const mcMember = mapGristToMailchimp(allowedFields, tenantConfig.fieldMapping);
-  if (hasMailchimpId) {
-    mcMember.mailchimp_id = rawFields.Mailchimp_ID || rawFields.mailchimp_id;
+  const email = (allowedFields.Email_1 || allowedFields.Email || allowedFields.email || rawFields.Email_1 || rawFields.Email || rawFields.email || '').toLowerCase().trim();
+
+  let lockToken: string | null = null;
+  if (email) {
+    lockToken = await acquireContactLock(tenantId, email, 30);
+    if (!lockToken) {
+      throw new Error(`Contact lock active for ${email}, delaying sync retry.`);
+    }
   }
 
-  if (!mcMember.email_address && !mcMember.mailchimp_id) {
-    console.warn(`[Worker] Skipping Mailchimp push for tenant [${tenantId}]: no email address or Mailchimp ID found.`);
-    return;
-  }
-
-  // 4. Push to Mailchimp
-  const mcResult = await upsertMailchimpMember(tenantConfig, mcMember);
-  console.log(`[Worker] Successfully synced member [${mcMember.email_address}] to Mailchimp (ID: ${mcResult.id})`);
-
-  // 5. If this was an unconnected contact (no previous Mailchimp_ID), write back the assigned MailchimpID to Grist
-  if (!hasMailchimpId && mcResult.id && recordId) {
-    console.log(`[Worker] Writing back assigned Mailchimp ID [${mcResult.id}] to Grist record [${recordId}]`);
-    await writeToGrist(
-      tenantConfig,
-      {
-        Mailchimp_ID: mcResult.id,
-        Sync_Source: 'Microservice',
-      },
-      recordId
+  try {
+    // 3. Map to Mailchimp subscriber payload
+    const mcMember = mapGristToMailchimp(
+      allowedFields,
+      tenantConfig.fieldMapping,
+      tenantConfig.rules?.fieldDirections
     );
+    if (hasMailchimpId) {
+      mcMember.mailchimp_id = rawFields.Mailchimp_ID || rawFields.mailchimp_id;
+    }
+
+    if (!mcMember.email_address && !mcMember.mailchimp_id) {
+      console.warn(`[Worker] Skipping Mailchimp push for tenant [${tenantId}]: no email address or Mailchimp ID found.`);
+      return;
+    }
+
+    // 4. Push to Mailchimp
+    const mcResult = await upsertMailchimpMember(tenantConfig, mcMember);
+    console.log(`[Worker] Successfully synced member [${mcMember.email_address}] to Mailchimp (ID: ${mcResult.id})`);
+
+    // 5. If this was an unconnected contact (no previous Mailchimp_ID), write back the assigned MailchimpID to Grist
+    if (!hasMailchimpId && mcResult.id && recordId) {
+      console.log(`[Worker] Writing back assigned Mailchimp ID [${mcResult.id}] to Grist record [${recordId}]`);
+      await writeToGrist(
+        tenantConfig,
+        {
+          Mailchimp_ID: mcResult.id,
+          Sync_Source: 'Microservice',
+        },
+        recordId
+      );
+    }
+  } finally {
+    if (email && lockToken) {
+      await releaseContactLock(tenantId, email, lockToken);
+    }
   }
 }
 

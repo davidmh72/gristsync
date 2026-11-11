@@ -2,10 +2,13 @@ import {
   processMailchimpWebhookEvent,
   processGristStagedEvent,
   handleDeadLetterJob,
+  acquireContactLock,
+  releaseContactLock,
 } from '../queue/worker';
 import * as tenantConfigModule from '../config/tenantConfig';
 import * as gristService from '../services/grist.service';
 import * as mailchimpService from '../services/mailchimp.service';
+import { redisClient } from '../queue/connection';
 import { TenantConfig } from '../types/sync.types';
 
 jest.mock('bullmq', () => ({
@@ -24,6 +27,9 @@ jest.mock('../queue/connection', () => ({
   redisClient: {
     ping: jest.fn().mockResolvedValue('PONG'),
     quit: jest.fn().mockResolvedValue('OK'),
+    set: jest.fn().mockResolvedValue('OK'),
+    get: jest.fn().mockResolvedValue('mock-token-xyz'),
+    del: jest.fn().mockResolvedValue(1),
     on: jest.fn(),
   },
 }));
@@ -175,6 +181,64 @@ describe('Worker Event Processing', () => {
         'Fatal network timeout',
         { test: 'bad' }
       );
+    });
+  });
+
+  describe('Redis Contact Mutex', () => {
+    it('acquires lock with NX and EX 30s TTL when available', async () => {
+      (redisClient.set as jest.Mock).mockResolvedValue('OK');
+
+      const token = await acquireContactLock('client-test', 'user@example.com', 30);
+
+      expect(token).toBeDefined();
+      expect(typeof token).toBe('string');
+      expect(redisClient.set).toHaveBeenCalledWith(
+        'lock:contact:client-test:user@example.com',
+        token,
+        'EX',
+        30,
+        'NX'
+      );
+    });
+
+    it('returns null if contact lock is already held by another worker', async () => {
+      (redisClient.set as jest.Mock).mockResolvedValue(null);
+
+      const token = await acquireContactLock('client-test', 'contested@example.com', 30);
+
+      expect(token).toBeNull();
+    });
+
+    it('releases lock if token matches current value', async () => {
+      (redisClient.get as jest.Mock).mockResolvedValue('token-123');
+
+      await releaseContactLock('client-test', 'user@example.com', 'token-123');
+
+      expect(redisClient.get).toHaveBeenCalledWith('lock:contact:client-test:user@example.com');
+      expect(redisClient.del).toHaveBeenCalledWith('lock:contact:client-test:user@example.com');
+    });
+
+    it('does not delete lock if token has expired or belongs to another process', async () => {
+      (redisClient.get as jest.Mock).mockResolvedValue('different-token');
+
+      await releaseContactLock('client-test', 'user@example.com', 'token-123');
+
+      expect(redisClient.del).not.toHaveBeenCalled();
+    });
+
+    it('throws retry error in processGristStagedEvent if contact lock cannot be acquired', async () => {
+      (redisClient.set as jest.Mock).mockResolvedValue(null);
+
+      const payload = {
+        record: {
+          First_Name: 'Contested',
+          Email_1: 'contested@example.com',
+        },
+      };
+
+      await expect(
+        processGristStagedEvent('client-test', 'update', payload)
+      ).rejects.toThrow('Contact lock active for contested@example.com');
     });
   });
 });

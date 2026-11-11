@@ -63,3 +63,50 @@ export async function upsertMailchimpMember(
     status: data.status || member.status || 'subscribed',
   };
 }
+
+export interface MailchimpFieldSchema {
+  tag: string;
+  name: string;
+  type: string;
+  required: boolean;
+}
+
+/**
+ * Fetches standard and custom merge fields for the configured Mailchimp list
+ */
+export async function fetchMailchimpMergeFields(
+  tenantConfig: TenantConfig
+): Promise<MailchimpFieldSchema[]> {
+  const { serverPrefix, listId, apiKey } = tenantConfig.mailchimp;
+  const url = `https://${serverPrefix}.api.mailchimp.com/3.0/lists/${listId}/merge-fields?count=100`;
+  const authHeader = `Basic ${Buffer.from(`anystring:${apiKey}`).toString('base64')}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      Authorization: authHeader,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to fetch Mailchimp merge fields [${response.status}]: ${errorText}`);
+  }
+
+  const data: any = await response.json();
+  const mergeFields: MailchimpFieldSchema[] = (data.merge_fields || []).map((mf: any) => ({
+    tag: mf.tag,
+    name: mf.name,
+    type: mf.type,
+    required: !!mf.required,
+  }));
+
+  // Always include standard Mailchimp contact fields at the top
+  const standardFields: MailchimpFieldSchema[] = [
+    { tag: 'EMAIL', name: 'Email Address', type: 'email', required: true },
+    { tag: 'STATUS', name: 'Subscription Status', type: 'choice', required: false },
+  ];
+
+  return [...standardFields, ...mergeFields];
+}
+

@@ -101,4 +101,88 @@ describe('Tenant Config Loader', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
   });
+
+  describe('fetchConfigFromGrist', () => {
+    const baseConfig = {
+      tenantId: 'client-alpha',
+      grist: {
+        docId: 'doc123',
+        tableId: 'Contacts',
+        apiUrl: 'https://grist.example.com/api/docs/doc123',
+        apiKey: 'grist-api-key',
+      },
+      mailchimp: {
+        listId: 'list999',
+        apiKey: 'mc-api-key',
+        serverPrefix: 'us20',
+      },
+      fieldMapping: {
+        email: 'Email_1',
+      },
+      rules: {
+        lockEmailIfMailchimpIdExists: true,
+      },
+    };
+
+    const originalFetch = global.fetch;
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+    });
+
+    it('fetches remote configuration from GristSync_Config table and merges it', async () => {
+      const remotePayload = {
+        fieldMapping: {
+          email: 'Email_1',
+          fname: 'First_Name',
+          lname: 'Last_Name',
+        },
+        rules: {
+          lockEmailIfMailchimpIdExists: false,
+          fieldDirections: {
+            email: 'mailchimp_only',
+            fname: 'two_way',
+          },
+        },
+      };
+
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          records: [
+            {
+              id: 1,
+              fields: {
+                Config_Payload: JSON.stringify(remotePayload),
+              },
+            },
+          ],
+        }),
+      } as any);
+
+      const { fetchConfigFromGrist } = require('../config/tenantConfig');
+      const updated = await fetchConfigFromGrist(baseConfig);
+
+      expect(updated.fieldMapping).toEqual(remotePayload.fieldMapping);
+      expect(updated.rules.lockEmailIfMailchimpIdExists).toBe(false);
+      expect(updated.rules.fieldDirections).toEqual(remotePayload.rules.fieldDirections);
+      expect(global.fetch).toHaveBeenCalledWith(
+        'https://grist.example.com/api/docs/doc123/tables/GristSync_Config/records',
+        expect.objectContaining({ method: 'GET' })
+      );
+    });
+
+    it('falls back to base config if GristSync_Config table does not exist', async () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        text: jest.fn().mockResolvedValue('Table not found'),
+      } as any);
+
+      const { fetchConfigFromGrist } = require('../config/tenantConfig');
+      const updated = await fetchConfigFromGrist(baseConfig);
+
+      expect(updated).toEqual(baseConfig);
+    });
+  });
 });

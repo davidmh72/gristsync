@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import webhookRouter from './routes/webhook.routes';
+import schemaRouter from './routes/schema.routes';
 import { startSyncWorker } from './queue/worker';
 import { redisClient } from './queue/connection';
 import { loadTenantConfigs } from './config/tenantConfig';
@@ -39,8 +40,13 @@ app.get('/health', async (req: Request, res: Response) => {
   });
 });
 
-// Mount Webhook & Integration Routes
+// Serve Grist Custom Widget Static Assets
+const publicDir = process.env.PUBLIC_DIR || path.join(__dirname, '../public');
+app.use('/widget', express.static(publicDir));
+
+// Mount Webhook, Schema & Integration Routes
 app.use('/', webhookRouter);
+app.use('/', schemaRouter);
 
 // Initialize BullMQ Background Worker Engine
 const syncWorker = startSyncWorker();

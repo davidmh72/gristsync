@@ -1,4 +1,4 @@
-import { writeToGrist, writeSyncLog } from '../services/grist.service';
+import { writeToGrist, writeSyncLog, fetchGristColumns } from '../services/grist.service';
 import { TenantConfig } from '../types/sync.types';
 
 describe('Grist Service', () => {
@@ -77,4 +77,42 @@ describe('Grist Service', () => {
       })
     );
   });
+
+  it('fetches column definitions from Grist table', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        columns: [
+          { id: 'Email_1', fields: { label: 'Primary Email', type: 'Text' } },
+          { id: 'First_Name', fields: { label: 'First Name', type: 'Text' } },
+          { id: 'Status', fields: { label: 'Subscription Status', type: 'Choice' } },
+        ],
+      }),
+    } as any);
+
+    const columns = await fetchGristColumns(mockConfig);
+
+    expect(columns).toEqual([
+      { id: 'Email_1', label: 'Primary Email', type: 'Text' },
+      { id: 'First_Name', label: 'First Name', type: 'Text' },
+      { id: 'Status', label: 'Subscription Status', type: 'Choice' },
+    ]);
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://grist.example.com/api/docs/doc123/tables/Contacts/columns',
+      expect.objectContaining({ method: 'GET' })
+    );
+  });
+
+  it('throws an error if Grist columns API returns an error response', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: jest.fn().mockResolvedValue('Table not found'),
+    } as any);
+
+    await expect(fetchGristColumns(mockConfig)).rejects.toThrow(
+      'Failed to fetch Grist columns [404]: Table not found'
+    );
+  });
 });
+

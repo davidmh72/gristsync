@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GristSync - Field Mapping & Integration</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-title">
+        <h1>GristSync Visual Mapper</h1>
+        <span id="tenantBadge" class="badge badge-connected">Loading...</span>
+      </div>
+      <div class="header-status">
+        <span id="gristStatus" class="badge badge-connected">Grist: Ready</span>
+        <span id="mcStatus" class="badge badge-connected">Mailchimp: Connected</span>
+      </div>
+    </header>
+
+    <div id="alertBanner" class="banner"></div>
+
+    <div class="card">
+      <h2>Sync Instance Details</h2>
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="tenantIdInput">Tenant Identifier</label>
+          <input type="text" id="tenantIdInput" placeholder="e.g. client-alpha">
+        </div>
+        <div class="form-group">
+          <label for="gristTableSelect">Grist Target Table</label>
+          <select id="gristTableSelect">
+            <option value="Contacts">Contacts</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label for="mcAudience">Mailchimp Audience List ID</label>
+          <input type="text" id="mcAudience" readonly placeholder="Loading list ID...">
+        </div>
+        <div class="form-group">
+          <label for="mcServer">Mailchimp Server Prefix</label>
+          <input type="text" id="mcServer" readonly placeholder="e.g. us20">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <h2>Visual Field Mapping & Directionality</h2>
+        <button id="addMappingBtn" class="btn btn-secondary btn-sm">+ Add Field</button>
+      </div>
+      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+        Specify which system owns each field. Mailchimp-only fields will never be overwritten by Grist edits, protecting compliance.
+      </p>
+
+      <table class="mapping-table">
+        <thead>
+          <tr>
+            <th style="width: 32%;">Grist Column</th>
+            <th style="width: 28%;">Authority / Direction</th>
+            <th style="width: 32%;">Mailchimp Field</th>
+            <th style="width: 8%;"></th>
+          </tr>
+        </thead>
+        <tbody id="mappingBody">
+          <!-- Dynamic mapping rows -->
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Safety & Guardrails</h2>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="lockEmailCheckbox" checked>
+          <span><strong>Lock Email Field:</strong> Prevent Grist users from altering the primary email address once a Mailchimp ID is linked.</span>
+        </label>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="syncActiveCheckbox" checked>
+          <span><strong>Sync Active:</strong> Enable live bidirectional event handling between this table and Mailchimp.</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="actions-bar">
+      <button id="reloadBtn" class="btn btn-secondary">Refresh Schemas</button>
+      <button id="saveBtn" class="btn btn-primary">Save Mapping Configuration</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

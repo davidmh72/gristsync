@@ -29,6 +29,7 @@ export function parseRawConfig(raw: RawTenantConfig): TenantConfig {
     fieldMapping: raw.field_mapping || {},
     rules: {
       lockEmailIfMailchimpIdExists: raw.rules?.lock_email_if_mailchimp_id_exists ?? true,
+      fieldDirections: raw.rules?.field_directions || {},
     },
   };
 }
@@ -72,4 +73,48 @@ export function setTenantConfig(config: TenantConfig): void {
 
 export function clearTenantConfigs(): void {
   tenantCache.clear();
+}
+
+/**
+ * Fetches dynamic configuration stored in Grist's GristSync_Config table.
+ * If found, merges the dynamic rules/mappings into baseConfig and updates the cache.
+ * If table does not exist or fetch fails, falls back safely to baseConfig.
+ */
+export async function fetchConfigFromGrist(baseConfig: TenantConfig): Promise<TenantConfig> {
+  const url = `${baseConfig.grist.apiUrl}/tables/GristSync_Config/records`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${baseConfig.grist.apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      return baseConfig;
+    }
+
+    const data: any = await response.json();
+    const records = data.records || [];
+    if (records.length === 0 || !records[0].fields?.Config_Payload) {
+      return baseConfig;
+    }
+
+    const payload = JSON.parse(records[0].fields.Config_Payload);
+    const merged: TenantConfig = {
+      ...baseConfig,
+      fieldMapping: payload.fieldMapping || baseConfig.fieldMapping,
+      rules: {
+        ...baseConfig.rules,
+        ...(payload.rules || {}),
+      },
+    };
+
+    tenantCache.set(merged.tenantId, merged);
+    return merged;
+  } catch (err: any) {
+    console.warn(`[Config Loader] Could not fetch dynamic config from Grist for ${baseConfig.tenantId}:`, err.message);
+    return baseConfig;
+  }
 }

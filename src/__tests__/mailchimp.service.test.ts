@@ -1,4 +1,4 @@
-import { upsertMailchimpMember } from '../services/mailchimp.service';
+import { upsertMailchimpMember, fetchMailchimpMergeFields } from '../services/mailchimp.service';
 import { TenantConfig } from '../types/sync.types';
 
 describe('Mailchimp Service', () => {
@@ -52,4 +52,41 @@ describe('Mailchimp Service', () => {
       })
     );
   });
+
+  it('fetches merge fields from Mailchimp list and includes standard fields', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        merge_fields: [
+          { tag: 'FNAME', name: 'First Name', type: 'text', required: false },
+          { tag: 'LNAME', name: 'Last Name', type: 'text', required: false },
+          { tag: 'PHONE', name: 'Phone Number', type: 'phone', required: false },
+        ],
+      }),
+    } as any);
+
+    const fields = await fetchMailchimpMergeFields(mockConfig);
+
+    expect(fields).toHaveLength(5);
+    expect(fields[0]).toEqual({ tag: 'EMAIL', name: 'Email Address', type: 'email', required: true });
+    expect(fields[1]).toEqual({ tag: 'STATUS', name: 'Subscription Status', type: 'choice', required: false });
+    expect(fields[2]).toEqual({ tag: 'FNAME', name: 'First Name', type: 'text', required: false });
+    expect(global.fetch).toHaveBeenCalledWith(
+      'https://us10.api.mailchimp.com/3.0/lists/list999/merge-fields?count=100',
+      expect.objectContaining({ method: 'GET' })
+    );
+  });
+
+  it('throws an error if Mailchimp merge fields API returns non-ok response', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: jest.fn().mockResolvedValue('API Key Invalid'),
+    } as any);
+
+    await expect(fetchMailchimpMergeFields(mockConfig)).rejects.toThrow(
+      'Failed to fetch Mailchimp merge fields [401]: API Key Invalid'
+    );
+  });
 });
+

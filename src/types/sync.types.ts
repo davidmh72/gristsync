@@ -1,3 +1,5 @@
+export type FieldDirection = 'two_way' | 'grist_only' | 'mailchimp_only' | 'create_only';
+
 export interface RawTenantConfig {
   tenant_id: string;
   grist: {
@@ -14,6 +16,7 @@ export interface RawTenantConfig {
   field_mapping: Record<string, string>;
   rules?: {
     lock_email_if_mailchimp_id_exists?: boolean;
+    field_directions?: Record<string, FieldDirection>;
   };
 }
 
@@ -33,6 +36,7 @@ export interface TenantConfig {
   fieldMapping: Record<string, string>;
   rules: {
     lockEmailIfMailchimpIdExists: boolean;
+    fieldDirections?: Record<string, FieldDirection>;
   };
 }
 
