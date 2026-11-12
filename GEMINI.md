@@ -31,6 +31,8 @@ GristSync is a high-reliability, multi-tenant bidirectional synchronization serv
 3. **Micro-Phased Execution**:
    - Decompose multi-step tasks into discrete architectural layers (Types $\rightarrow$ Safety/Services $\rightarrow$ Queue/Routes $\rightarrow$ Tests).
    - Validate each layer with compiler checks (`npm run build`) and test suites (`npm test`) before proceeding to the next.
+4. **Proactive Documentation & Learning Capture**:
+   - Autonomously capture and persist durable operational lessons, container constraints, and environment requirements into this file without waiting for explicit prompts.
 
 ## CI/CD Standards (GitHub Actions)
 - All branches and pull requests are verified via GitHub Actions (`.github/workflows/ci.yml`).
@@ -38,4 +40,6 @@ GristSync is a high-reliability, multi-tenant bidirectional synchronization serv
 
 ## Configuration & Deployment
 - Tenant configurations are stored as individual JSON files in `/app/configs` (mounted read-only).
+- **Hybrid Auto-Discovery**: When embedded as a Grist Custom Widget, `public/app.js` auto-detects `docId` and server `baseUrl` via `grist.docApi.getAccessToken()`. It queries `GET /api/schema/tenant-by-doc/:docId` to automatically bind configured tenants or presents an in-widget setup wizard (`POST /api/schema/tenant/init`) that persists credentials to `/app/configs/<tenantId>.json` so BullMQ background workers run 24/7 without active browser sessions.
 - In Docker environments, services communicate via the internal Docker network (e.g., `REDIS_HOST=gristsync-redis`).
+- **Ad-Hoc Container Execution**: When running ad-hoc verification or diagnostic containers via `docker run`, always attach `--network traefik-proxy` so the container can resolve `gristsync-redis` without blocking boot loops.

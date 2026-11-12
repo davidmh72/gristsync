@@ -6,6 +6,9 @@ import {
   parseRawConfig,
   loadTenantConfigs,
   getTenantConfig,
+  getTenantByDocId,
+  saveTenantConfigToDisk,
+  setTenantConfig,
   clearTenantConfigs,
 } from '../config/tenantConfig';
 import { RawTenantConfig } from '../types/sync.types';
@@ -99,8 +102,114 @@ describe('Tenant Config Loader', () => {
 
       // Cleanup
       fs.rmSync(tempDir, { recursive: true, force: true });
-    });
-  });
+      });
+      });
+
+      describe('getTenantByDocId', () => {
+      it('returns the tenant matching the specified docId', () => {
+      const tenantA = {
+        tenantId: 'tenant-a',
+        grist: {
+          docId: 'doc-aaa',
+          tableId: 'Contacts',
+          apiUrl: 'https://grist.test/api/docs/doc-aaa',
+          apiKey: 'key-a',
+        },
+        mailchimp: {
+          listId: 'list-a',
+          apiKey: 'mc-a',
+          serverPrefix: 'us1',
+        },
+        fieldMapping: { email: 'Email' },
+        rules: { lockEmailIfMailchimpIdExists: true },
+      };
+
+      const tenantB = {
+        tenantId: 'tenant-b',
+        grist: {
+          docId: 'doc-bbb',
+          tableId: 'Clients',
+          apiUrl: 'https://grist.test/api/docs/doc-bbb',
+          apiKey: 'key-b',
+        },
+        mailchimp: {
+          listId: 'list-b',
+          apiKey: 'mc-b',
+          serverPrefix: 'us2',
+        },
+        fieldMapping: { email: 'Email' },
+        rules: { lockEmailIfMailchimpIdExists: true },
+      };
+
+      setTenantConfig(tenantA);
+      setTenantConfig(tenantB);
+
+      const found = getTenantByDocId('doc-bbb');
+      expect(found).toBeDefined();
+      expect(found?.tenantId).toBe('tenant-b');
+      expect(found?.grist.docId).toBe('doc-bbb');
+      });
+
+      it('returns undefined when no tenant has matching docId', () => {
+      const found = getTenantByDocId('non-existent-doc');
+      expect(found).toBeUndefined();
+      });
+      });
+
+      describe('saveTenantConfigToDisk', () => {
+      it('persists a new raw tenant config JSON file and registers it in cache', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gristsync-save-'));
+      const newRaw: RawTenantConfig = {
+        tenant_id: 'dynamic-tenant-1',
+        grist: {
+          doc_id: 'doc-dynamic-999',
+          table_id: 'Contacts',
+          api_url: 'http://grist:8484/api/docs/doc-dynamic-999',
+          api_key: 'env:TEST_SECRET_KEY',
+        },
+        mailchimp: {
+          list_id: 'list-dyn',
+          api_key: 'mc-dyn-key',
+          server_prefix: 'us20',
+        },
+        field_mapping: {
+          email: 'Email_1',
+        },
+        rules: {
+          lock_email_if_mailchimp_id_exists: true,
+        },
+      };
+
+      const saved = saveTenantConfigToDisk(newRaw, tempDir);
+      expect(saved.tenantId).toBe('dynamic-tenant-1');
+      expect(saved.grist.docId).toBe('doc-dynamic-999');
+      expect(saved.grist.apiKey).toBe('secret-12345');
+
+      // Verify file exists on disk
+      const filePath = path.join(tempDir, 'dynamic-tenant-1.json');
+      expect(fs.existsSync(filePath)).toBe(true);
+      const fileContent = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      expect(fileContent.tenant_id).toBe('dynamic-tenant-1');
+      expect(fileContent.grist.doc_id).toBe('doc-dynamic-999');
+
+      // Verify cached
+      const cached = getTenantConfig('dynamic-tenant-1');
+      expect(cached).toBeDefined();
+      expect(cached?.grist.docId).toBe('doc-dynamic-999');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      });
+
+      it('throws an error if tenant_id is missing', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gristsync-save-err-'));
+      const invalidRaw = {
+        grist: { doc_id: 'doc1' },
+      } as any;
+
+      expect(() => saveTenantConfigToDisk(invalidRaw, tempDir)).toThrow('Invalid tenant configuration: tenant_id is required');
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      });
+      });
 
   describe('fetchConfigFromGrist', () => {
     const baseConfig = {

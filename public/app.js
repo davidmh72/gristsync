@@ -1,7 +1,9 @@
 // GristSync Custom Widget Application
 
 let state = {
-  tenantId: 'client-alpha',
+  tenantId: '',
+  detectedDocId: null,
+  detectedBaseUrl: null,
   gristColumns: [],
   mailchimpFields: [],
   config: null,
@@ -12,6 +14,17 @@ const dom = {
   tenantBadge: document.getElementById('tenantBadge'),
   gristStatus: document.getElementById('gristStatus'),
   mcStatus: document.getElementById('mcStatus'),
+  setupWizard: document.getElementById('setupWizard'),
+  mainContent: document.getElementById('mainContent'),
+  wizardForm: document.getElementById('wizardForm'),
+  wizardDocId: document.getElementById('wizardDocId'),
+  wizardTableId: document.getElementById('wizardTableId'),
+  wizardGristUrl: document.getElementById('wizardGristUrl'),
+  wizardGristApiKey: document.getElementById('wizardGristApiKey'),
+  wizardMcApiKey: document.getElementById('wizardMcApiKey'),
+  wizardMcServer: document.getElementById('wizardMcServer'),
+  wizardMcListId: document.getElementById('wizardMcListId'),
+  wizardSubmitBtn: document.getElementById('wizardSubmitBtn'),
   tenantIdInput: document.getElementById('tenantIdInput'),
   gristTableSelect: document.getElementById('gristTableSelect'),
   mcAudience: document.getElementById('mcAudience'),
@@ -32,6 +45,26 @@ function showAlert(message, type = 'success') {
   setTimeout(() => {
     dom.alertBanner.style.display = 'none';
   }, 4000);
+}
+
+function showWizard(docId, baseUrl) {
+  if (dom.setupWizard) dom.setupWizard.style.display = 'block';
+  if (dom.mainContent) dom.mainContent.style.display = 'none';
+  if (dom.tenantBadge) {
+    dom.tenantBadge.textContent = 'Setup Required';
+    dom.tenantBadge.className = 'badge badge-locked';
+  }
+  if (dom.gristStatus) {
+    dom.gristStatus.textContent = 'Grist: Unconfigured';
+    dom.gristStatus.className = 'badge badge-locked';
+  }
+  if (dom.wizardDocId) dom.wizardDocId.value = docId || '';
+  if (dom.wizardGristUrl) dom.wizardGristUrl.value = baseUrl || '';
+}
+
+function showMain() {
+  if (dom.setupWizard) dom.setupWizard.style.display = 'none';
+  if (dom.mainContent) dom.mainContent.style.display = 'block';
 }
 
 // Extract tenant from query string if available
@@ -291,18 +324,112 @@ dom.tenantIdInput.addEventListener('change', (e) => {
   loadTenantData();
 });
 
-// Initialize Grist Custom Widget Handlers
-if (window.grist) {
-  try {
-    grist.ready({ requiredAccess: 'full' });
-    grist.onRecord((record) => {
-      // Respond to selected record if inspecting individual contact mapping
-    });
-  } catch (e) {
-    console.warn('Grist API initialization note:', e);
-  }
+// Wizard Form Submission Handler
+if (dom.wizardForm) {
+  dom.wizardForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    dom.wizardSubmitBtn.disabled = true;
+    dom.wizardSubmitBtn.textContent = 'Connecting...';
+
+    const payload = {
+      docId: dom.wizardDocId.value.trim(),
+      tableId: dom.wizardTableId.value.trim() || 'Contacts',
+      gristApiUrl: dom.wizardGristUrl.value.trim(),
+      gristApiKey: dom.wizardGristApiKey.value.trim(),
+      mailchimpApiKey: dom.wizardMcApiKey.value.trim(),
+      mailchimpServerPrefix: dom.wizardMcServer.value.trim(),
+      mailchimpListId: dom.wizardMcListId.value.trim(),
+    };
+
+    try {
+      const res = await fetch('/api/schema/tenant/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server responded with ${res.status}`);
+      }
+
+      const data = await res.json();
+      state.tenantId = data.tenantId;
+
+      // Save to Grist widget options so subsequent widget loads recall this tenant
+      if (window.grist && typeof grist.setOptions === 'function') {
+        await grist.setOptions({ tenantId: state.tenantId }).catch(() => {});
+      }
+
+      showAlert('Integration initialized successfully! Background sync active.', 'success');
+      showMain();
+      await loadTenantData();
+    } catch (err) {
+      console.error('Failed to initialize tenant:', err);
+      showAlert(`Setup failed: ${err.message}`, 'error');
+    } finally {
+      dom.wizardSubmitBtn.disabled = false;
+      dom.wizardSubmitBtn.textContent = 'Initialize & Connect Tenant';
+    }
+  });
 }
 
-// Initialize on page load
-initTenantId();
-loadTenantData();
+// Widget & Tenant Initialization Lifecycle
+async function initApp() {
+  // 1. Check URL query parameters
+  const params = new URLSearchParams(window.location.search);
+  const tenantFromQuery = params.get('tenant') || params.get('tenantId');
+  if (tenantFromQuery) {
+    state.tenantId = tenantFromQuery;
+    showMain();
+    await loadTenantData();
+    return;
+  }
+
+  // 2. If running inside Grist Custom Widget, perform environment auto-discovery
+  if (window.grist) {
+    try {
+      grist.ready({ requiredAccess: 'full' });
+
+      // Check stored widget options first
+      const options = await grist.getOptions().catch(() => null);
+      if (options && options.tenantId) {
+        state.tenantId = options.tenantId;
+        showMain();
+        await loadTenantData();
+        return;
+      }
+
+      // Query access token for baseUrl and docId
+      const tokenInfo = await grist.docApi.getAccessToken({ readOnly: true }).catch(() => null);
+      if (tokenInfo && tokenInfo.baseUrl) {
+        state.detectedBaseUrl = tokenInfo.baseUrl;
+        state.detectedDocId = tokenInfo.baseUrl.split('/').pop();
+
+        // Check if GristSync backend already has a configuration for this document
+        const lookupRes = await fetch(`/api/schema/tenant-by-doc/${encodeURIComponent(state.detectedDocId)}`);
+        if (lookupRes.ok) {
+          const lookupData = await lookupRes.json();
+          state.tenantId = lookupData.tenantId;
+          await grist.setOptions({ tenantId: state.tenantId }).catch(() => {});
+          showMain();
+          await loadTenantData();
+          return;
+        } else {
+          // Document detected but no tenant registered yet: show setup wizard
+          showWizard(state.detectedDocId, state.detectedBaseUrl);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Grist auto-discovery note:', err);
+    }
+  }
+
+  // 3. Fallback to default tenant (client-alpha)
+  state.tenantId = 'client-alpha';
+  showMain();
+  await loadTenantData();
+}
+
+initApp();

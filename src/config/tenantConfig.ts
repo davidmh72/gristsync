@@ -67,6 +67,33 @@ export function getTenantConfig(tenantId: string): TenantConfig | undefined {
   return tenantCache.get(tenantId);
 }
 
+export function getTenantByDocId(docId: string): TenantConfig | undefined {
+  for (const config of tenantCache.values()) {
+    if (config.grist.docId === docId) {
+      return config;
+    }
+  }
+  return undefined;
+}
+
+export function saveTenantConfigToDisk(rawConfig: RawTenantConfig, configDir: string): TenantConfig {
+  if (!rawConfig || !rawConfig.tenant_id) {
+    throw new Error('Invalid tenant configuration: tenant_id is required');
+  }
+
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+
+  const filePath = path.join(configDir, `${rawConfig.tenant_id}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(rawConfig, null, 2), 'utf-8');
+
+  const parsed = parseRawConfig(rawConfig);
+  tenantCache.set(parsed.tenantId, parsed);
+  console.log(`[Config Loader] Saved and registered tenant config for: ${parsed.tenantId}`);
+  return parsed;
+}
+
 export function setTenantConfig(config: TenantConfig): void {
   tenantCache.set(config.tenantId, config);
 }

@@ -192,4 +192,83 @@ describe('Schema Routes', () => {
       expect(res.body.error).toContain('not found');
     });
   });
+
+  describe('GET /api/schema/tenant-by-doc/:docId', () => {
+    it('returns tenant metadata when a document ID matches', async () => {
+      (tenantConfigModule.getTenantByDocId as jest.Mock).mockReturnValue(mockConfig);
+
+      const res = await request(app).get('/api/schema/tenant-by-doc/doc123');
+
+      expect(res.status).toBe(200);
+      expect(res.body.tenantId).toBe('client-alpha');
+      expect(res.body.docId).toBe('doc123');
+      expect(res.body.tableId).toBe('Contacts');
+    });
+
+    it('returns 404 if no tenant is found for the docId', async () => {
+      (tenantConfigModule.getTenantByDocId as jest.Mock).mockReturnValue(undefined);
+
+      const res = await request(app).get('/api/schema/tenant-by-doc/non-existent-doc');
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain('No tenant configured');
+    });
+  });
+
+  describe('POST /api/schema/tenant/init', () => {
+    it('creates a new tenant configuration and returns 201 Created', async () => {
+      const createdConfig = {
+        tenantId: 'tenant-test1234',
+        grist: {
+          docId: 'doc-auto-1',
+          tableId: 'Contacts',
+          apiUrl: 'http://grist:8484/api/docs/doc-auto-1',
+          apiKey: 'key-g-1',
+        },
+        mailchimp: {
+          listId: 'list-mc-1',
+          apiKey: 'key-mc-1',
+          serverPrefix: 'us20',
+        },
+        fieldMapping: { email: 'Email_1' },
+        rules: { lockEmailIfMailchimpIdExists: true },
+      };
+
+      (tenantConfigModule.saveTenantConfigToDisk as jest.Mock).mockReturnValue(createdConfig);
+
+      const initPayload = {
+        docId: 'doc-auto-1',
+        gristApiUrl: 'http://grist:8484/api/docs/doc-auto-1',
+        gristApiKey: 'key-g-1',
+        mailchimpListId: 'list-mc-1',
+        mailchimpApiKey: 'key-mc-1',
+        mailchimpServerPrefix: 'us20',
+      };
+
+      const res = await request(app)
+        .post('/api/schema/tenant/init')
+        .send(initPayload);
+
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe('success');
+      expect(res.body.tenantId).toBe('tenant-test1234');
+      expect(res.body.config.grist.docId).toBe('doc-auto-1');
+      expect(res.body.config.grist.apiKey).toBeUndefined(); // Secrets omitted
+      expect(tenantConfigModule.saveTenantConfigToDisk).toHaveBeenCalled();
+    });
+
+    it('returns 400 if required initialization parameters are missing', async () => {
+      const invalidPayload = {
+        docId: 'doc-auto-1',
+        // missing keys & urls
+      };
+
+      const res = await request(app)
+        .post('/api/schema/tenant/init')
+        .send(invalidPayload);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Missing required parameters');
+    });
+  });
 });

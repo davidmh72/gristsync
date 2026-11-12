@@ -1,7 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { getTenantConfig, setTenantConfig } from '../config/tenantConfig';
+import path from 'path';
+import crypto from 'crypto';
+import {
+  getTenantConfig,
+  setTenantConfig,
+  getTenantByDocId,
+  saveTenantConfigToDisk,
+} from '../config/tenantConfig';
 import { fetchMailchimpMergeFields } from '../services/mailchimp.service';
 import { fetchGristColumns } from '../services/grist.service';
+import { RawTenantConfig } from '../types/sync.types';
 
 const router = Router();
 
@@ -126,6 +134,109 @@ router.post('/api/schema/config/:tenantId', (req: Request, res: Response): void 
     fieldMapping: config.fieldMapping,
     rules: config.rules,
   });
+});
+
+/**
+ * GET /api/schema/tenant-by-doc/:docId
+ * Matches a Grist document ID to a registered tenant configuration
+ */
+router.get('/api/schema/tenant-by-doc/:docId', (req: Request, res: Response): void => {
+  const { docId } = req.params;
+  const config = getTenantByDocId(docId);
+
+  if (!config) {
+    res.status(404).json({ error: `No tenant configured for docId: ${docId}` });
+    return;
+  }
+
+  res.status(200).json({
+    tenantId: config.tenantId,
+    docId: config.grist.docId,
+    tableId: config.grist.tableId,
+  });
+});
+
+/**
+ * POST /api/schema/tenant/init
+ * Dynamically initializes a new tenant configuration from the custom widget UI
+ */
+router.post('/api/schema/tenant/init', (req: Request, res: Response): void => {
+  const {
+    tenantId,
+    docId,
+    tableId,
+    gristApiUrl,
+    gristApiKey,
+    mailchimpListId,
+    mailchimpApiKey,
+    mailchimpServerPrefix,
+    fieldMapping,
+    rules,
+  } = req.body;
+
+  if (!docId || !gristApiUrl || !gristApiKey || !mailchimpListId || !mailchimpApiKey || !mailchimpServerPrefix) {
+    res.status(400).json({
+      error: 'Missing required parameters: docId, gristApiUrl, gristApiKey, mailchimpListId, mailchimpApiKey, and mailchimpServerPrefix are required.',
+    });
+    return;
+  }
+
+  const assignedTenantId = tenantId && typeof tenantId === 'string' && tenantId.trim() !== ''
+    ? tenantId.trim()
+    : `tenant-${crypto.randomBytes(4).toString('hex')}`;
+
+  const rawConfig: RawTenantConfig = {
+    tenant_id: assignedTenantId,
+    grist: {
+      doc_id: docId,
+      table_id: tableId || 'Contacts',
+      api_url: gristApiUrl,
+      api_key: gristApiKey,
+    },
+    mailchimp: {
+      list_id: mailchimpListId,
+      api_key: mailchimpApiKey,
+      server_prefix: mailchimpServerPrefix,
+    },
+    field_mapping: fieldMapping || {
+      external_email: 'Email_1',
+      external_first_name: 'First_Name',
+      external_last_name: 'Last_Name',
+    },
+    rules: {
+      lock_email_if_mailchimp_id_exists: rules?.lockEmailIfMailchimpIdExists ?? true,
+      field_directions: rules?.fieldDirections || {},
+    },
+  };
+
+  const configDir = process.env.CONFIG_DIR || path.resolve(process.cwd(), 'configs');
+
+  try {
+    const saved = saveTenantConfigToDisk(rawConfig, configDir);
+    res.status(201).json({
+      status: 'success',
+      tenantId: saved.tenantId,
+      config: {
+        tenantId: saved.tenantId,
+        grist: {
+          docId: saved.grist.docId,
+          tableId: saved.grist.tableId,
+          apiUrl: saved.grist.apiUrl,
+        },
+        mailchimp: {
+          listId: saved.mailchimp.listId,
+          serverPrefix: saved.mailchimp.serverPrefix,
+        },
+        fieldMapping: saved.fieldMapping,
+        rules: saved.rules,
+      },
+    });
+  } catch (error: any) {
+    console.error(`[Schema Router] Failed to initialize tenant config:`, error.message);
+    res.status(500).json({
+      error: `Failed to persist tenant config: ${error.message}`,
+    });
+  }
 });
 
 export default router;
